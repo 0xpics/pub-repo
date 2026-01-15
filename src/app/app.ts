@@ -7,9 +7,9 @@ import { RouterOutlet } from '@angular/router';
   selector: 'app-root',
   standalone: true,
   imports: [CommonModule, RouterOutlet],
-  templateUrl: './app.html', // Ele vai ler o app.html que limpamos acima
+  templateUrl: './app.html',
 })
-export class AppComponent {
+export class App { // Alterado de AppComponent para App para bater com seus arquivos main.ts
   private http = inject(HttpClient);
   dados = signal<any>(null);
 
