@@ -6,7 +6,7 @@ frontend:
         - npm install
     build:
       commands:
-        - npx ng build
+        - npx ng build --configuration production
   artifacts:
     baseDirectory: dist/frontend/browser
     files:
