@@ -1,64 +1,80 @@
-<div style="text-align:center; margin-top: 50px; font-family: Arial, sans-serif; color: #333;">
-  <h1>Projeto Fullstack AWS</h1>
+<div style="text-align:center; margin-top: 50px; font-family: 'Segoe UI', Arial, sans-serif; color: #333;">
+  <h1>🚀 FibrIA Dashboard: Fullstack AWS</h1>
   
-  <button (click)="chamarApi()" style="padding: 15px 30px; font-size: 18px; cursor: pointer; background: #007bff; color: white; border: none; border-radius: 8px;">
+  <button (click)="chamarApi()" style="padding: 15px 30px; font-size: 18px; cursor: pointer; background: #007bff; color: white; border: none; border-radius: 8px; transition: 0.3s; box-shadow: 0 4px 6px rgba(0,0,0,0.1);">
     Consultar Banco de Dados (Lambda)
   </button>
 
-  <div *ngIf="dados()" style="margin-top: 30px; background: #f4f4f4; padding: 20px; display: inline-block; border-radius: 10px; width: 80%;">
-    <h3 style="color: #28a745;">Resposta Recebida:</h3>
-    <pre style="text-align: left;">{{ dados() | json }}</pre>
+  <div style="margin: 30px auto; padding: 25px; background: white; border-radius: 15px; width: 85%; max-width: 900px; box-shadow: 0 10px 25px rgba(0,0,0,0.1); border: 1px solid #eee;">
+    <h3 style="color: #007bff; margin-top: 0; display: flex; align-items: center; justify-content: center; gap: 10px;">
+      📊 Telemetria em Tempo Real (RDS)
+    </h3>
+    <div style="height: 350px; position: relative;">
+      <canvas #meuGrafico></canvas>
+    </div>
   </div>
 
-  <hr style="margin: 50px 0; border: 1px solid #eee;">
+  <details *ngIf="dados() && dados().length > 0" style="margin-top: 20px; background: #f9f9f9; padding: 10px; border-radius: 8px; display: inline-block; width: 80%; cursor: pointer; border: 1px solid #ddd;">
+    <summary style="font-weight: bold; color: #666;">Ver dados brutos da última leitura (JSON)</summary>
+    <div style="margin-top: 15px; background: #ffffff; padding: 15px; border-radius: 5px; border: 1px solid #eee;">
+      <pre style="text-align: left; font-size: 12px; overflow-x: auto;">{{ dados() | json }}</pre>
+    </div>
+  </details>
 
-  <div *ngIf="statusInfra() as info; else carregando" style="max-width: 800px; margin: 0 auto; text-align: left; background: #222; color: white; padding: 25px; border-radius: 15px;">
+  <hr style="margin: 50px 0; border: 0; border-top: 2px solid #eee; width: 90%; margin-left: auto; margin-right: auto;">
+
+  <div *ngIf="statusInfra() as info; else carregando" style="max-width: 800px; margin: 0 auto 50px auto; text-align: left; background: #1e1e1e; color: #f4f4f4; padding: 25px; border-radius: 15px; box-shadow: 0 8px 16px rgba(0,0,0,0.3);">
     
-    <h2 style="color: #4caf50; border-bottom: 1px solid #444; padding-bottom: 10px;">🛡️ Status da Infraestrutura (RDS)</h2>
+    <h2 style="color: #4caf50; border-bottom: 1px solid #333; padding-bottom: 10px; margin-top: 0;">🛡️ Status da Infraestrutura (RDS)</h2>
 
     <div style="display: flex; gap: 20px; margin-top: 20px;">
-      <div style="flex: 1; background: #333; padding: 15px; border-radius: 8px; border-left: 5px solid #4caf50;">
-        <small style="color: #aaa;">AUTOMAÇÃO (pg_cron)</small><br>
-        <strong>Zelador: {{ info.agendamento_manutencao?.active ? 'ATIVO' : 'OFFLINE' }}</strong><br>
-        <small>Rotina: {{ info.agendamento_manutencao?.schedule || 'Não configurada' }}</small>
+      <div style="flex: 1; background: #2d2d2d; padding: 15px; border-radius: 8px; border-left: 5px solid #4caf50;">
+        <small style="color: #888; font-weight: bold;">AUTOMAÇÃO (pg_cron)</small><br>
+        <strong style="font-size: 1.1rem;">Zelador: {{ info.agendamento_manutencao?.active ? 'ATIVO' : 'OFFLINE' }}</strong><br>
+        <small style="color: #4caf50;">Rotina: {{ info.agendamento_manutencao?.schedule || 'Não configurada' }}</small>
       </div>
 
-      <div style="flex: 1; background: #333; padding: 15px; border-radius: 8px; border-left: 5px solid #2196f3;">
-        <small style="color: #aaa;">ORÇAMENTO FIXO</small><br>
-        <strong>{{ info.custo_infra }}</strong><br>
-        <small>Limite: 20GB Storage</small>
+      <div style="flex: 1; background: #2d2d2d; padding: 15px; border-radius: 8px; border-left: 5px solid #2196f3;">
+        <small style="color: #888; font-weight: bold;">ORÇAMENTO FIXO</small><br>
+        <strong style="font-size: 1.1rem;">{{ info.custo_infra }}</strong><br>
+        <small style="color: #2196f3;">Limite: 20GB Storage</small>
       </div>
     </div>
 
-    <h3 style="margin-top: 30px; font-size: 1.1rem;">Mapa de Particionamento (Time-Series)</h3>
-    <p style="font-size: 0.8rem; color: #888;">Tabelas físicas criadas automaticamente para otimizar performance:</p>
+    <h3 style="margin-top: 30px; font-size: 1.1rem; color: #4caf50;">Mapa de Particionamento (Time-Series)</h3>
+    <p style="font-size: 0.8rem; color: #aaa;">Tabelas físicas criadas automaticamente pelo <strong>pg_partman</strong>:</p>
     
-    <table style="width: 100%; border-collapse: collapse; margin-top: 10px; background: #2a2a2a;">
+    <table style="width: 100%; border-collapse: collapse; margin-top: 10px; background: #262626;">
       <thead>
-        <tr style="border-bottom: 2px solid #444; color: #4caf50;">
-          <th style="padding: 10px; text-align: left;">Partição</th>
-          <th style="padding: 10px; text-align: left;">Status</th>
+        <tr style="border-bottom: 2px solid #333; color: #888; font-size: 0.8rem; text-transform: uppercase;">
+          <th style="padding: 12px; text-align: left;">Partição Ativa</th>
+          <th style="padding: 12px; text-align: left;">Estado</th>
         </tr>
       </thead>
       <tbody>
         <tr *ngFor="let p of info.particoes_ativas" style="border-bottom: 1px solid #333;">
-          <td style="padding: 10px; font-family: monospace; font-size: 0.9rem;">{{ p?.child_table }}</td>
-          <td style="padding: 10px;">
-            <span style="color: #4caf50;">● Ativa</span>
+          <td style="padding: 12px; font-family: 'Courier New', monospace; font-size: 0.9rem; color: #81c784;">{{ p?.child_table }}</td>
+          <td style="padding: 12px;">
+            <span style="background: rgba(76, 175, 80, 0.1); color: #4caf50; padding: 4px 8px; border-radius: 4px; font-size: 0.7rem; font-weight: bold;">● PRONTA</span>
           </td>
         </tr>
       </tbody>
     </table>
 
-    <div style="margin-top: 20px; font-size: 0.7rem; color: #666; text-align: center;">
-      Versão do Motor: {{ info.motor }}
+    <div style="margin-top: 25px; font-size: 0.7rem; color: #555; text-align: center; font-style: italic;">
+      Motor: {{ info.motor }}
     </div>
   </div>
 
   <ng-template #carregando>
-    <div style="margin-top: 20px; color: #666; font-style: italic;">
+    <div style="margin-top: 20px; color: #666; font-style: italic; padding: 40px;">
+      <div style="display: inline-block; width: 20px; height: 20px; border: 3px solid #eee; border-top-color: #007bff; border-radius: 50%; animation: spin 1s linear infinite;"></div>
       Sincronizando metadados do RDS...
     </div>
   </ng-template>
 
 </div>
+
+<style>
+  @keyframes spin { to { transform: rotate(360deg); } }
+</style>
