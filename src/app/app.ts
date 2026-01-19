@@ -4,6 +4,7 @@ import { CommonModule } from '@angular/common';
 import { Chart, registerables } from 'chart.js'; 
 import { InfraStatus } from './infra.model';
 
+// Registra os componentes do Chart.js
 Chart.register(...registerables);
 
 @Component({
@@ -17,22 +18,27 @@ export class App implements OnInit {
   
   @ViewChild('meuGrafico') elementoGrafico!: ElementRef;
 
+  // Signals para reatividade
   dados = signal<any[]>([]); 
   statusInfra = signal<InfraStatus | null>(null);
   chart: any;
 
   ngOnInit() {
     this.carregarInfra();
-    // Por padrão, iniciamos com o conceito de Time Bucket (agrupado por minuto)
+    // Inicialização padrão: Tempo Real (últimos minutos)
     this.chamarApi(undefined, undefined, 'minute');
   }
 
-  // --- ATUALIZAÇÃO: Agora aceita Filtros e Bucket ---
+  /**
+   * Chama a API Lambda com suporte a Filtro de Data e Time Bucket
+   * @param inicio Data inicial opcional (YYYY-MM-DD)
+   * @param fim Data final opcional (YYYY-MM-DD)
+   * @param agrupamento Tipo de bucket (minute, hour, day)
+   */
   chamarApi(inicio?: string, fim?: string, agrupamento: string = 'minute') {
-    // Definimos a base da URL
+    // Montagem dinâmica da URL com query strings
     let url = `https://mympqg08a4.execute-api.us-east-1.amazonaws.com/data?bucket=${agrupamento}`;
 
-    // Adicionamos os filtros de Data/Range se existirem
     if (inicio) url += `&start_date=${inicio}`;
     if (fim) url += `&end_date=${fim}`;
 
@@ -42,42 +48,57 @@ export class App implements OnInit {
         this.renderizarGrafico(res, agrupamento);
       },
       error: (err) => {
-        console.error('Erro na telemetria:', err);
+        console.error('Erro na chamada da telemetria:', err);
       }
     });
   }
 
+  /**
+   * Renderiza ou atualiza o gráfico Chart.js
+   * @param listaDados Array de objetos vindos do RDS
+   * @param bucket Nível de agrupamento para definir a formatação do eixo X
+   */
   renderizarGrafico(listaDados: any[], bucket: string) {
     if (!listaDados || listaDados.length === 0 || !this.elementoGrafico) return;
 
+    // Invertemos o array para a ordem cronológica correta no gráfico
     const dadosInvertidos = [...listaDados].reverse();
     
-    // Ajuste de labels: Se for bucket de "day", mostra data. Se for "minute/hour", mostra hora.
+    // LÓGICA DE PESQUISA: Formatação dinâmica de datas (Eixo X)
     const labels = dadosInvertidos.map(d => {
       const data = new Date(d.data_envio);
-      return bucket === 'day' ? data.toLocaleDateString() : data.toLocaleTimeString();
+      if (bucket === 'day') {
+        // Se visualizando meses, mostra "DD/MM"
+        return data.toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit' });
+      }
+      // Se visualizando tempo real ou horas, mostra "HH:MM"
+      return data.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
     });
 
     const valores = dadosInvertidos.map(d => d.valor);
 
+    // Destruir instância anterior para evitar bugs de hover e renderização
     if (this.chart) {
       this.chart.destroy();
     }
+
+    // Configurações visuais dinâmicas baseadas no modo selecionado
+    const corPrincipal = bucket === 'day' ? '#28a745' : (bucket === 'hour' ? '#6f42c1' : '#007bff');
 
     this.chart = new Chart(this.elementoGrafico.nativeElement, {
       type: 'line',
       data: {
         labels: labels,
         datasets: [{
-          label: 'Valor da Telemetria',
+          label: bucket === 'day' ? 'Média Diária' : 'Valor da Telemetria',
           data: valores,
-          borderColor: '#007bff',
-          backgroundColor: 'rgba(0, 123, 255, 0.1)',
+          borderColor: corPrincipal,
+          backgroundColor: `${corPrincipal}1A`, // Cor com 10% de opacidade para o preenchimento
           borderWidth: 3,
           fill: true,
           tension: 0.3, 
-          pointRadius: 4,
-          pointBackgroundColor: '#007bff'
+          pointRadius: bucket === 'day' ? 5 : 3,
+          pointBackgroundColor: corPrincipal
         }]
       },
       options: {
@@ -87,18 +108,28 @@ export class App implements OnInit {
           legend: { display: false } 
         },
         scales: {
-          y: { beginAtZero: false, grid: { color: '#eee' } },
-          x: { grid: { display: false } }
+          y: { 
+            beginAtZero: false, 
+            grid: { color: '#eee' },
+            title: { display: true, text: 'Valor do Sensor' }
+          },
+          x: { 
+            grid: { display: false },
+            title: { display: true, text: bucket === 'day' ? 'Período (Dias)' : 'Tempo (Horário)' }
+          }
         }
       }
     });
   }
 
+  /**
+   * Monitoramento de Infraestrutura (Metadados do Banco)
+   */
   carregarInfra() {
     const url = 'https://mympqg08a4.execute-api.us-east-1.amazonaws.com/infra/status';
     this.http.get<InfraStatus>(url).subscribe({
       next: (res) => this.statusInfra.set(res),
-      error: (err) => console.error('Erro ao carregar infra:', err)
+      error: (err) => console.error('Erro ao carregar metadados de infra:', err)
     });
   }
 }
