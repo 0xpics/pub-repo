@@ -1,10 +1,9 @@
 import { Component, inject, signal, OnInit, ViewChild, ElementRef } from '@angular/core';
 import { HttpClient, HttpClientModule } from '@angular/common/http';
 import { CommonModule } from '@angular/common';
-import { Chart, registerables } from 'chart.js'; // Importação do gráfico
+import { Chart, registerables } from 'chart.js'; 
 import { InfraStatus } from './infra.model';
 
-// Registra todos os componentes necessários do Chart.js
 Chart.register(...registerables);
 
 @Component({
@@ -16,29 +15,31 @@ Chart.register(...registerables);
 export class App implements OnInit {
   private http = inject(HttpClient);
   
-  // Referência ao elemento <canvas #meuGrafico> do HTML
   @ViewChild('meuGrafico') elementoGrafico!: ElementRef;
 
-  // Signals para manter a reatividade moderna
   dados = signal<any[]>([]); 
   statusInfra = signal<InfraStatus | null>(null);
-  
-  // Variável para armazenar a instância do gráfico e podermos atualizar/destruir
   chart: any;
 
   ngOnInit() {
     this.carregarInfra();
-    // Chamamos a API de telemetria logo no início para o gráfico não abrir vazio
-    this.chamarApi();
+    // Por padrão, iniciamos com o conceito de Time Bucket (agrupado por minuto)
+    this.chamarApi(undefined, undefined, 'minute');
   }
 
-  // Busca os dados de telemetria e atualiza o gráfico
-  chamarApi() {
-    const url = 'https://mympqg08a4.execute-api.us-east-1.amazonaws.com/data';
+  // --- ATUALIZAÇÃO: Agora aceita Filtros e Bucket ---
+  chamarApi(inicio?: string, fim?: string, agrupamento: string = 'minute') {
+    // Definimos a base da URL
+    let url = `https://mympqg08a4.execute-api.us-east-1.amazonaws.com/data?bucket=${agrupamento}`;
+
+    // Adicionamos os filtros de Data/Range se existirem
+    if (inicio) url += `&start_date=${inicio}`;
+    if (fim) url += `&end_date=${fim}`;
+
     this.http.get<any[]>(url).subscribe({
       next: (res) => {
         this.dados.set(res);
-        this.renderizarGrafico(res);
+        this.renderizarGrafico(res, agrupamento);
       },
       error: (err) => {
         console.error('Erro na telemetria:', err);
@@ -46,18 +47,19 @@ export class App implements OnInit {
     });
   }
 
-  renderizarGrafico(listaDados: any[]) {
-    // Se não houver dados ou o elemento canvas não existir, cancela
+  renderizarGrafico(listaDados: any[], bucket: string) {
     if (!listaDados || listaDados.length === 0 || !this.elementoGrafico) return;
 
-    // Invertemos para que o gráfico mostre do mais antigo para o mais recente (esquerda para direita)
     const dadosInvertidos = [...listaDados].reverse();
     
-    // Extraímos as horas e os valores
-    const labels = dadosInvertidos.map(d => new Date(d.data_envio).toLocaleTimeString());
+    // Ajuste de labels: Se for bucket de "day", mostra data. Se for "minute/hour", mostra hora.
+    const labels = dadosInvertidos.map(d => {
+      const data = new Date(d.data_envio);
+      return bucket === 'day' ? data.toLocaleDateString() : data.toLocaleTimeString();
+    });
+
     const valores = dadosInvertidos.map(d => d.valor);
 
-    // Se já existir um gráfico, destruímos para criar um novo (evita sobreposição visual)
     if (this.chart) {
       this.chart.destroy();
     }
@@ -73,7 +75,7 @@ export class App implements OnInit {
           backgroundColor: 'rgba(0, 123, 255, 0.1)',
           borderWidth: 3,
           fill: true,
-          tension: 0.3, // Deixa a linha levemente curva (mais elegante)
+          tension: 0.3, 
           pointRadius: 4,
           pointBackgroundColor: '#007bff'
         }]
@@ -82,7 +84,7 @@ export class App implements OnInit {
         responsive: true,
         maintainAspectRatio: false,
         plugins: {
-          legend: { display: false } // Oculta a legenda para ficar mais limpo
+          legend: { display: false } 
         },
         scales: {
           y: { beginAtZero: false, grid: { color: '#eee' } },
@@ -92,7 +94,6 @@ export class App implements OnInit {
     });
   }
 
-  // Busca os metadados do Partman e Cron (Sua governança)
   carregarInfra() {
     const url = 'https://mympqg08a4.execute-api.us-east-1.amazonaws.com/infra/status';
     this.http.get<InfraStatus>(url).subscribe({
