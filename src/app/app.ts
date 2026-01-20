@@ -18,7 +18,7 @@ export class App implements OnInit {
 
   @ViewChild('meuGrafico') elementoGrafico!: ElementRef;
 
-  // Signals para estado reativo e filtros manuais
+  // Signals para estado reativo
   dados = signal<any[]>([]); 
   statusInfra = signal<InfraStatus | null>(null);
   isLoading = signal<boolean>(false);
@@ -28,8 +28,8 @@ export class App implements OnInit {
 
   ngOnInit() {
     this.carregarInfra();
-    // Inicialização: Busca dados do dia de hoje (Janeiro de 2026)
-    this.exibirHoje();
+    // Inicialização: Busca dados do dia de hoje para o "Tempo Real"
+    this.exibirTempoReal();
   }
 
   /**
@@ -57,27 +57,33 @@ export class App implements OnInit {
   }
 
   /**
-   * LÓGICA DE FILTROS DINÂMICOS (BOTÕES RÁPIDOS)
+   * CONCEITO 1: FILTRO POR DATA (Poda de Partição Específica)
+   * Acessa apenas uma partição para trazer detalhes minuto a minuto.
    */
-
-  exibirHoje() {
-    // Definido como 20/01/2026 para alinhar com seus dados de teste
-    const hoje = '2026-01-20'; 
+  exibirTempoReal() {
+    // Busca a data atual do sistema no formato YYYY-MM-DD
+    const hoje = new Date().toISOString().split('T')[0];
     this.buscarDados(hoje, hoje, 'minute');
   }
 
-  exibirMesAtual() {
-    // Range para o mês de Janeiro completo
-    this.buscarDados('2026-01-01', '2026-01-31', 'hour');
-  }
+  /**
+   * CONCEITO 2: FILTRO POR RANGE (Varredura de Partições Mensais)
+   * Permite escolher qualquer mês e busca o range completo do dia 01 ao último dia.
+   */
+  buscarPorMes(event: any) {
+    const mesSelecionado = event.target.value; // Formato: "YYYY-MM"
+    if (!mesSelecionado) return;
 
-  exibirUltimos90Dias() {
-    // Range estendido para testar o cruzamento de múltiplas partições mensais
-    this.buscarDados('2026-01-01', '2026-04-30', 'day');
+    const dataRef = new Date(mesSelecionado + "-01T12:00:00");
+    const primeiroDia = new Date(dataRef.getFullYear(), dataRef.getMonth(), 1).toISOString().split('T')[0];
+    const ultimoDia = new Date(dataRef.getFullYear(), dataRef.getMonth() + 1, 0).toISOString().split('T')[0];
+    
+    this.buscarDados(primeiroDia, ultimoDia, 'hour');
   }
 
   /**
-   * FILTRO POR RANGE MANUAL (Ex: 25/01 até 25/05)
+   * CONCEITO 3: TIME BUCKET (Agregação via SQL em Range Customizado)
+   * Agrupa dados automaticamente (dia/hora/minuto) dependendo do tamanho do intervalo.
    */
   buscarPorRangeManual() {
     const inicio = this.dataInicioManual();
@@ -88,13 +94,13 @@ export class App implements OnInit {
       return;
     }
 
-    // Calcula a distância entre as datas para sugerir o grão (Time Bucket) ideal
     const diffInMs = new Date(fim).getTime() - new Date(inicio).getTime();
     const diffInDays = diffInMs / (1000 * 60 * 60 * 24);
 
+    // Seleção inteligente do Bucket (Grão)
     let bucket = 'minute';
-    if (diffInDays > 1 && diffInDays <= 7) bucket = 'hour';
-    if (diffInDays > 7) bucket = 'day';
+    if (diffInDays > 1 && diffInDays <= 31) bucket = 'hour';
+    if (diffInDays > 31) bucket = 'day';
 
     this.buscarDados(inicio, fim, bucket);
   }
@@ -109,7 +115,6 @@ export class App implements OnInit {
   renderizarGrafico(listaDados: any[], bucket: string) {
     if (!this.elementoGrafico || !listaDados.length) return;
 
-    // Ordenação cronológica para garantir a continuidade da linha
     const dadosOrdenados = [...listaDados].sort((a, b) => 
       new Date(a.data_envio).getTime() - new Date(b.data_envio).getTime()
     );
@@ -161,9 +166,9 @@ export class App implements OnInit {
 
   private getConfiguracaoVisual(bucket: string) {
     const mapas = {
-      'minute': { cor: '#17a2b8', label: 'Dados Granulares (Minuto)' },
-      'hour': { cor: '#28a745', label: 'Média por Hora' },
-      'day': { cor: '#6f42c1', label: 'Histórico por Dia' }
+      'minute': { cor: '#17a2b8', label: 'Detalhe em Tempo Real (Minutos)' },
+      'hour': { cor: '#28a745', label: 'Consumo Médio (Horas)' },
+      'day': { cor: '#6f42c1', label: 'Tendência Histórica (Dias)' }
     };
     return mapas[bucket as keyof typeof mapas] || mapas['hour'];
   }
