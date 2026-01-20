@@ -1,10 +1,9 @@
 import { Component, inject, signal, OnInit, ViewChild, ElementRef } from '@angular/core';
-import { HttpClient, HttpClientModule } from '@angular/common/http';
+import { HttpClient, HttpClientModule, HttpParams } from '@angular/common/http';
 import { CommonModule } from '@angular/common';
 import { Chart, registerables } from 'chart.js'; 
 import { InfraStatus } from './infra.model';
 
-// Registra os componentes necessários do Chart.js
 Chart.register(...registerables);
 
 @Component({
@@ -15,139 +14,123 @@ Chart.register(...registerables);
 })
 export class App implements OnInit {
   private http = inject(HttpClient);
-  
+  private readonly API_BASE = 'https://mympqg08a4.execute-api.us-east-1.amazonaws.com';
+
   @ViewChild('meuGrafico') elementoGrafico!: ElementRef;
 
-  // Signals para reatividade e estado da aplicação
+  // Signals para estado reativo
   dados = signal<any[]>([]); 
   statusInfra = signal<InfraStatus | null>(null);
-  chart: any;
+  isLoading = signal<boolean>(false);
+  chart: Chart | null = null;
 
   ngOnInit() {
     this.carregarInfra();
-    // Inicialização padrão: Tempo Real (últimos minutos)
-    this.chamarApi(undefined, undefined, 'minute');
+    // Inicialização: Busca dados do dia atual (Time Bucket: Minute)
+    const hoje = new Date().toISOString().split('T')[0];
+    this.buscarDados(hoje, hoje, 'minute');
   }
 
   /**
-   * Chamada principal à API Lambda
-   * Gerencia Filtro por Data, Range e Time Bucket via Query Strings
+   * Implementação dos 3 Conceitos de Banco de Dados Particionado:
+   * 1. Filtro por Data (Single Day)
+   * 2. Filtro por Range (Start/End)
+   * 3. Time Bucket (Agrupamento via Extension/SQL)
    */
-  chamarApi(inicio?: string, fim?: string, agrupamento: string = 'minute') {
-    
-    // Tratamento para o seletor manual: evita que strings vazias quebrem a URL
-    if (inicio === "" || inicio === null) inicio = undefined;
-    if (fim === "" || fim === null) fim = undefined;
+  buscarDados(inicio?: string, fim?: string, bucket: string = 'hour') {
+    this.isLoading.set(true);
 
-    // URL base do seu API Gateway
-    let url = `https://mympqg08a4.execute-api.us-east-1.amazonaws.com/data?bucket=${agrupamento}`;
+    // Uso de HttpParams para garantir que a query string seja montada corretamente
+    // Isso é vital para que o RDS receba as datas no formato que o pg_partman espera
+    let params = new HttpParams().set('bucket', bucket);
 
-    // Adição dinâmica de parâmetros
-    if (inicio) url += `&start_date=${inicio}`;
-    if (fim) url += `&end_date=${fim}`;
+    if (inicio) params = params.set('start_date', inicio);
+    if (fim) params = params.set('end_date', fim);
 
-    this.http.get<any[]>(url).subscribe({
+    this.http.get<any[]>(`${this.API_BASE}/data`, { params }).subscribe({
       next: (res) => {
         this.dados.set(res);
-        this.renderizarGrafico(res, agrupamento);
+        this.renderizarGrafico(res, bucket);
+        this.isLoading.set(false);
       },
       error: (err) => {
-        console.error('Erro na chamada da telemetria:', err);
+        console.error('Erro ao buscar telemetria:', err);
+        this.isLoading.set(false);
       }
     });
   }
 
-  /**
-   * Lógica do Gráfico: Ajusta labels e cores conforme o botão clicado
-   */
   renderizarGrafico(listaDados: any[], bucket: string) {
-    if (!listaDados || listaDados.length === 0 || !this.elementoGrafico) return;
+    if (!this.elementoGrafico || !listaDados.length) return;
 
-    // Invertemos o array pois o RDS retorna DESC (mais novo primeiro)
-    const dadosInvertidos = [...listaDados].reverse();
-    
-    // LÓGICA DE LABELS PARA OS 3 CONCEITOS
-    const labels = dadosInvertidos.map(d => {
-      const data = new Date(d.data_envio);
-      
-      if (bucket === 'day') {
-        // Caso 3: Time Bucket (Resumo Diário)
-        return data.toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit' });
-      }
+    // RDS com Partman geralmente retorna ordenado por data_envio DESC
+    // Invertemos para o gráfico exibir da esquerda para a direita (cronológico)
+    const dadosOrdenados = [...listaDados].sort((a, b) => 
+      new Date(a.data_envio).getTime() - new Date(b.data_envio).getTime()
+    );
 
-      if (bucket === 'hour') {
-        // Caso 2: Filtro por Range (Visualização por Hora)
-        return data.toLocaleDateString('pt-BR', { day: '2-digit' }) + ' ' + 
-               data.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
-      }
+    const labels = dadosOrdenados.map(d => this.formatarLabelPorBucket(d.data_envio, bucket));
+    const valores = dadosOrdenados.map(d => d.valor);
 
-      // Caso 1: Filtro por Data ou Tempo Real (Visualização por Minuto)
-      return data.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
-    });
+    if (this.chart) this.chart.destroy();
 
-    const valores = dadosInvertidos.map(d => d.valor);
-
-    // Destruir instância anterior para evitar sobreposição
-    if (this.chart) {
-      this.chart.destroy();
-    }
-
-    // Cores diferentes para cada conceito (Alinhado com os botões do HTML)
-    const corPrincipal = bucket === 'day' ? '#6f42c1' : (bucket === 'hour' ? '#28a745' : '#17a2b8');
+    // Estilização baseada no conceito selecionado
+    const configEstilo = this.getConfiguracaoVisual(bucket);
 
     this.chart = new Chart(this.elementoGrafico.nativeElement, {
       type: 'line',
       data: {
-        labels: labels,
+        labels,
         datasets: [{
-          label: bucket === 'day' ? 'Média Diária' : 'Valor Telemetria',
+          label: configEstilo.label,
           data: valores,
-          borderColor: corPrincipal,
-          backgroundColor: `${corPrincipal}1A`,
-          borderWidth: 3,
+          borderColor: configEstilo.cor,
+          backgroundColor: `${configEstilo.cor}22`,
+          borderWidth: 2,
           fill: true,
-          tension: 0.3, 
-          pointRadius: bucket === 'day' ? 5 : 2,
-          pointBackgroundColor: corPrincipal
+          tension: 0.4,
+          pointRadius: bucket === 'minute' ? 0 : 3 // Remove pontos em dados densos
         }]
       },
       options: {
         responsive: true,
         maintainAspectRatio: false,
-        plugins: {
-          legend: { display: false },
-          tooltip: {
-            mode: 'index',
-            intersect: false,
-          }
-        },
         scales: {
-          y: { 
-            grid: { color: '#f0f0f0' },
-            title: { display: true, text: 'Valor do Sensor' }
-          },
-          x: { 
-            grid: { display: false },
-            ticks: {
-              maxRotation: 45,
-              minRotation: 45,
-              autoSkip: true,
-              maxTicksLimit: 12
-            }
-          }
+          x: { ticks: { maxTicksLimit: 10 } },
+          y: { beginAtZero: false }
+        },
+        plugins: {
+          tooltip: { intersect: false, mode: 'index' }
         }
       }
     });
   }
 
-  /**
-   * Monitoramento de Infraestrutura: Carrega metadados do RDS
-   */
+  private formatarLabelPorBucket(dataStr: string, bucket: string): string {
+    const data = new Date(dataStr);
+    switch (bucket) {
+      case 'day': 
+        return data.toLocaleDateString('pt-BR'); // Ex: 20/05/2024
+      case 'hour': 
+        return data.getHours() + ':00'; // Ex: 14:00
+      default: 
+        return data.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
+    }
+  }
+
+  private getConfiguracaoVisual(bucket: string) {
+    const mapas = {
+      'minute': { cor: '#17a2b8', label: 'Tempo Real (Minutos)' },
+      'hour': { cor: '#28a745', label: 'Consumo por Hora' },
+      'day': { cor: '#6f42c1', label: 'Histórico Diário' }
+    };
+    return mapas[bucket as keyof typeof mapas] || mapas['hour'];
+  }
+
   carregarInfra() {
-    const url = 'https://mympqg08a4.execute-api.us-east-1.amazonaws.com/infra/status';
-    this.http.get<InfraStatus>(url).subscribe({
+    this.http.get<InfraStatus>(`${this.API_BASE}/infra/status`).subscribe({
       next: (res) => this.statusInfra.set(res),
-      error: (err) => console.error('Erro ao carregar infra:', err)
+      error: (err) => console.error('Erro infra:', err)
     });
   }
 }
