@@ -18,26 +18,31 @@ export class App implements OnInit {
   
   @ViewChild('meuGrafico') elementoGrafico!: ElementRef;
 
-  // Signals para reatividade
+  // Signals para reatividade e estado da aplicação
   dados = signal<any[]>([]); 
   statusInfra = signal<InfraStatus | null>(null);
   chart: any;
 
   ngOnInit() {
     this.carregarInfra();
-    // Inicialização: Mostra dados por minuto (Tempo Real)
+    // Inicialização padrão: Tempo Real (últimos minutos)
     this.chamarApi(undefined, undefined, 'minute');
   }
 
   /**
-   * Chamada principal à API
-   * Aceita início, fim e o tipo de agrupamento (Time Bucket)
+   * Chamada principal à API Lambda
+   * Gerencia Filtro por Data, Range e Time Bucket via Query Strings
    */
   chamarApi(inicio?: string, fim?: string, agrupamento: string = 'minute') {
     
-    // URL do seu API Gateway
+    // Tratamento para o seletor manual: evita que strings vazias quebrem a URL
+    if (inicio === "" || inicio === null) inicio = undefined;
+    if (fim === "" || fim === null) fim = undefined;
+
+    // URL base do seu API Gateway
     let url = `https://mympqg08a4.execute-api.us-east-1.amazonaws.com/data?bucket=${agrupamento}`;
 
+    // Adição dinâmica de parâmetros
     if (inicio) url += `&start_date=${inicio}`;
     if (fim) url += `&end_date=${fim}`;
 
@@ -58,35 +63,36 @@ export class App implements OnInit {
   renderizarGrafico(listaDados: any[], bucket: string) {
     if (!listaDados || listaDados.length === 0 || !this.elementoGrafico) return;
 
-    // Ordem cronológica (mais antigo para o mais novo)
+    // Invertemos o array pois o RDS retorna DESC (mais novo primeiro)
     const dadosInvertidos = [...listaDados].reverse();
     
-    // LÓGICA DE LABELS SIMPLIFICADA PARA OS 3 CONCEITOS
+    // LÓGICA DE LABELS PARA OS 3 CONCEITOS
     const labels = dadosInvertidos.map(d => {
       const data = new Date(d.data_envio);
       
       if (bucket === 'day') {
-        // Para Time Bucket (Botão 3): Mostra apenas o dia
+        // Caso 3: Time Bucket (Resumo Diário)
         return data.toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit' });
       }
 
       if (bucket === 'hour') {
-        // Para Filtro por Range (Botão 2): Mostra Dia + Hora para não repetir horários
+        // Caso 2: Filtro por Range (Visualização por Hora)
         return data.toLocaleDateString('pt-BR', { day: '2-digit' }) + ' ' + 
                data.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
       }
 
-      // Para Filtro por Data (Botão 1): Mostra apenas o horário detalhado
+      // Caso 1: Filtro por Data ou Tempo Real (Visualização por Minuto)
       return data.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
     });
 
     const valores = dadosInvertidos.map(d => d.valor);
 
+    // Destruir instância anterior para evitar sobreposição
     if (this.chart) {
       this.chart.destroy();
     }
 
-    // Cores diferentes para cada conceito (Diferencial visual para a banca)
+    // Cores diferentes para cada conceito (Alinhado com os botões do HTML)
     const corPrincipal = bucket === 'day' ? '#6f42c1' : (bucket === 'hour' ? '#28a745' : '#17a2b8');
 
     this.chart = new Chart(this.elementoGrafico.nativeElement, {
@@ -101,14 +107,19 @@ export class App implements OnInit {
           borderWidth: 3,
           fill: true,
           tension: 0.3, 
-          pointRadius: 3
+          pointRadius: bucket === 'day' ? 5 : 2,
+          pointBackgroundColor: corPrincipal
         }]
       },
       options: {
         responsive: true,
         maintainAspectRatio: false,
         plugins: {
-          legend: { display: false }
+          legend: { display: false },
+          tooltip: {
+            mode: 'index',
+            intersect: false,
+          }
         },
         scales: {
           y: { 
@@ -119,8 +130,9 @@ export class App implements OnInit {
             grid: { display: false },
             ticks: {
               maxRotation: 45,
+              minRotation: 45,
               autoSkip: true,
-              maxTicksLimit: 10
+              maxTicksLimit: 12
             }
           }
         }
@@ -129,7 +141,7 @@ export class App implements OnInit {
   }
 
   /**
-   * Metadados da Infraestrutura
+   * Monitoramento de Infraestrutura: Carrega metadados do RDS
    */
   carregarInfra() {
     const url = 'https://mympqg08a4.execute-api.us-east-1.amazonaws.com/infra/status';
