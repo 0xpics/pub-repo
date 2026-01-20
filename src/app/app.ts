@@ -18,31 +18,26 @@ export class App implements OnInit {
   
   @ViewChild('meuGrafico') elementoGrafico!: ElementRef;
 
-  // Signals para reatividade e estado da aplicação
+  // Signals para reatividade
   dados = signal<any[]>([]); 
   statusInfra = signal<InfraStatus | null>(null);
   chart: any;
 
   ngOnInit() {
     this.carregarInfra();
-    // Inicialização padrão: Tempo Real (últimos minutos)
+    // Inicialização: Mostra dados por minuto (Tempo Real)
     this.chamarApi(undefined, undefined, 'minute');
   }
 
   /**
-   * Chamada principal à API Lambda
-   * Gerencia Filtro por Data, Range e Time Bucket via Query Strings
+   * Chamada principal à API
+   * Aceita início, fim e o tipo de agrupamento (Time Bucket)
    */
   chamarApi(inicio?: string, fim?: string, agrupamento: string = 'minute') {
     
-    // Tratamento para evitar que strings vazias de inputs de data quebrem a lógica
-    if (inicio === "") inicio = undefined;
-    if (fim === "") fim = undefined;
-
-    // URL base do seu API Gateway
+    // URL do seu API Gateway
     let url = `https://mympqg08a4.execute-api.us-east-1.amazonaws.com/data?bucket=${agrupamento}`;
 
-    // Adição dinâmica de parâmetros para Filtro por Range
     if (inicio) url += `&start_date=${inicio}`;
     if (fim) url += `&end_date=${fim}`;
 
@@ -58,80 +53,65 @@ export class App implements OnInit {
   }
 
   /**
-   * Renderiza o gráfico utilizando Chart.js
-   * Implementa a lógica visual de diferenciação entre Tempo Real e Agrupado
+   * Lógica do Gráfico: Ajusta labels e cores conforme o botão clicado
    */
   renderizarGrafico(listaDados: any[], bucket: string) {
     if (!listaDados || listaDados.length === 0 || !this.elementoGrafico) return;
 
-    // Invertemos o array pois o RDS retorna DESC (mais novo primeiro)
+    // Ordem cronológica (mais antigo para o mais novo)
     const dadosInvertidos = [...listaDados].reverse();
     
-    // LÓGICA DE EIXO X INTELIGENTE (Detecta cruzamento de dias)
+    // LÓGICA DE LABELS SIMPLIFICADA PARA OS 3 CONCEITOS
     const labels = dadosInvertidos.map(d => {
       const data = new Date(d.data_envio);
       
-      // Caso 1: Visão Estratégica Mensal (Apenas data)
       if (bucket === 'day') {
+        // Para Time Bucket (Botão 3): Mostra apenas o dia
         return data.toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit' });
       }
 
-      // Caso 2: Detecção de Período Multi-dia
-      // Compara a data do primeiro e do último registro do set atual
-      const dataInicio = new Date(dadosInvertidos[0].data_envio).toLocaleDateString();
-      const dataFim = new Date(dadosInvertidos[dadosInvertidos.length - 1].data_envio).toLocaleDateString();
-      const isMultiDia = dataInicio !== dataFim;
-
-      if (isMultiDia) {
-        // Retorna "DD/MM HH:MM" para evitar confusão no gráfico
-        return data.toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit' }) + 
-               ' ' + 
+      if (bucket === 'hour') {
+        // Para Filtro por Range (Botão 2): Mostra Dia + Hora para não repetir horários
+        return data.toLocaleDateString('pt-BR', { day: '2-digit' }) + ' ' + 
                data.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
       }
 
-      // Caso 3: Dentro do mesmo dia (Apenas horário)
+      // Para Filtro por Data (Botão 1): Mostra apenas o horário detalhado
       return data.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
     });
 
     const valores = dadosInvertidos.map(d => d.valor);
 
-    // Destruir instância anterior para evitar bugs de renderização
     if (this.chart) {
       this.chart.destroy();
     }
 
-    // Identidade Visual Dinâmica
-    const corPrincipal = bucket === 'day' ? '#28a745' : (bucket === 'hour' ? '#6f42c1' : '#007bff');
+    // Cores diferentes para cada conceito (Diferencial visual para a banca)
+    const corPrincipal = bucket === 'day' ? '#6f42c1' : (bucket === 'hour' ? '#28a745' : '#17a2b8');
 
     this.chart = new Chart(this.elementoGrafico.nativeElement, {
       type: 'line',
       data: {
         labels: labels,
         datasets: [{
-          label: bucket === 'day' ? 'Média Diária (Bucket)' : 'Valor Telemetria',
+          label: bucket === 'day' ? 'Média Diária' : 'Valor Telemetria',
           data: valores,
           borderColor: corPrincipal,
-          backgroundColor: `${corPrincipal}1A`, 
+          backgroundColor: `${corPrincipal}1A`,
           borderWidth: 3,
           fill: true,
           tension: 0.3, 
-          pointRadius: bucket === 'day' ? 5 : 2,
-          pointBackgroundColor: corPrincipal
+          pointRadius: 3
         }]
       },
       options: {
         responsive: true,
         maintainAspectRatio: false,
         plugins: {
-          legend: { display: false },
-          tooltip: {
-            mode: 'index',
-            intersect: false,
-          }
+          legend: { display: false }
         },
         scales: {
           y: { 
-            beginAtZero: false, 
             grid: { color: '#f0f0f0' },
             title: { display: true, text: 'Valor do Sensor' }
           },
@@ -139,13 +119,8 @@ export class App implements OnInit {
             grid: { display: false },
             ticks: {
               maxRotation: 45,
-              minRotation: 45,
               autoSkip: true,
-              maxTicksLimit: 12
-            },
-            title: { 
-              display: true, 
-              text: bucket === 'day' ? 'Análise por Dia' : 'Linha do Tempo (Bucket)' 
+              maxTicksLimit: 10
             }
           }
         }
@@ -154,13 +129,13 @@ export class App implements OnInit {
   }
 
   /**
-   * Monitoramento de Infraestrutura: Carrega metadados do RDS e partições
+   * Metadados da Infraestrutura
    */
   carregarInfra() {
     const url = 'https://mympqg08a4.execute-api.us-east-1.amazonaws.com/infra/status';
     this.http.get<InfraStatus>(url).subscribe({
       next: (res) => this.statusInfra.set(res),
-      error: (err) => console.error('Erro ao carregar metadados de infra:', err)
+      error: (err) => console.error('Erro ao carregar infra:', err)
     });
   }
 }
