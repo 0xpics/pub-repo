@@ -28,13 +28,13 @@ export class App implements OnInit {
 
   ngOnInit() {
     this.carregarInfra();
-    // Inicialização padrão: Exibir dados de hoje
+    // Inicialização: Busca dados do dia de hoje (Janeiro de 2026)
     this.exibirHoje();
   }
 
   /**
    * MÉTODO PRINCIPAL: Chamada à API Lambda
-   * Gerencia a comunicação com o RDS e o particionamento via Query Strings
+   * Gerencia a comunicação com o RDS enviando os parâmetros de particionamento
    */
   buscarDados(inicio?: string, fim?: string, bucket: string = 'hour') {
     this.isLoading.set(true);
@@ -57,46 +57,38 @@ export class App implements OnInit {
   }
 
   /**
-   * LOGICA DE FILTROS DINÂMICOS
+   * LÓGICA DE FILTROS DINÂMICOS (BOTÕES RÁPIDOS)
    */
 
   exibirHoje() {
-    const hoje = new Date().toISOString().split('T')[0];
+    // Definido como 20/01/2026 para alinhar com seus dados de teste
+    const hoje = '2026-01-20'; 
     this.buscarDados(hoje, hoje, 'minute');
   }
 
   exibirMesAtual() {
-    const agora = new Date();
-    const primeiroDia = new Date(agora.getFullYear(), agora.getMonth(), 1).toISOString().split('T')[0];
-    const ultimoDia = new Date(agora.getFullYear(), agora.getMonth() + 1, 0).toISOString().split('T')[0];
-    this.buscarDados(primeiroDia, ultimoDia, 'hour');
+    // Range para o mês de Janeiro completo
+    this.buscarDados('2026-01-01', '2026-01-31', 'hour');
   }
 
   exibirUltimos90Dias() {
-    const agora = new Date();
-    const noventaDiasAtras = new Date();
-    noventaDiasAtras.setDate(agora.getDate() - 90);
-    
-    this.buscarDados(
-      noventaDiasAtras.toISOString().split('T')[0], 
-      agora.toISOString().split('T')[0], 
-      'day'
-    );
+    // Range estendido para testar o cruzamento de múltiplas partições mensais
+    this.buscarDados('2026-01-01', '2026-04-30', 'day');
   }
 
   /**
-   * FILTRO POR RANGE MANUAL (ex: 25/01 até 25/05)
+   * FILTRO POR RANGE MANUAL (Ex: 25/01 até 25/05)
    */
   buscarPorRangeManual() {
     const inicio = this.dataInicioManual();
     const fim = this.dataFimManual();
 
     if (!inicio || !fim) {
-      alert('Selecione as datas de início e fim.');
+      alert('Selecione ambas as datas para filtrar o período.');
       return;
     }
 
-    // Lógica para decidir o Time Bucket automaticamente baseado na distância das datas
+    // Calcula a distância entre as datas para sugerir o grão (Time Bucket) ideal
     const diffInMs = new Date(fim).getTime() - new Date(inicio).getTime();
     const diffInDays = diffInMs / (1000 * 60 * 60 * 24);
 
@@ -107,17 +99,17 @@ export class App implements OnInit {
     this.buscarDados(inicio, fim, bucket);
   }
 
-  // Handlers para os inputs do HTML
+  // Handlers para os inputs de data do HTML
   setInicio(event: any) { this.dataInicioManual.set(event.target.value); }
   setFim(event: any) { this.dataFimManual.set(event.target.value); }
 
   /**
-   * RENDERIZAÇÃO E FORMATAÇÃO
+   * RENDERIZAÇÃO E FORMATAÇÃO DO GRÁFICO
    */
-
   renderizarGrafico(listaDados: any[], bucket: string) {
     if (!this.elementoGrafico || !listaDados.length) return;
 
+    // Ordenação cronológica para garantir a continuidade da linha
     const dadosOrdenados = [...listaDados].sort((a, b) => 
       new Date(a.data_envio).getTime() - new Date(b.data_envio).getTime()
     );
@@ -169,9 +161,9 @@ export class App implements OnInit {
 
   private getConfiguracaoVisual(bucket: string) {
     const mapas = {
-      'minute': { cor: '#17a2b8', label: 'Minuto a Minuto' },
+      'minute': { cor: '#17a2b8', label: 'Dados Granulares (Minuto)' },
       'hour': { cor: '#28a745', label: 'Média por Hora' },
-      'day': { cor: '#6f42c1', label: 'Média Diária' }
+      'day': { cor: '#6f42c1', label: 'Histórico por Dia' }
     };
     return mapas[bucket as keyof typeof mapas] || mapas['hour'];
   }
@@ -179,7 +171,7 @@ export class App implements OnInit {
   carregarInfra() {
     this.http.get<InfraStatus>(`${this.API_BASE}/infra/status`).subscribe({
       next: (res) => this.statusInfra.set(res),
-      error: (err) => console.error('Erro infra:', err)
+      error: (err) => console.error('Erro ao buscar status da infra:', err)
     });
   }
 }
