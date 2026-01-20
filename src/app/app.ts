@@ -4,7 +4,7 @@ import { CommonModule } from '@angular/common';
 import { Chart, registerables } from 'chart.js'; 
 import { InfraStatus } from './infra.model';
 
-// Registra os componentes do Chart.js
+// Registra os componentes necessários do Chart.js
 Chart.register(...registerables);
 
 @Component({
@@ -18,7 +18,7 @@ export class App implements OnInit {
   
   @ViewChild('meuGrafico') elementoGrafico!: ElementRef;
 
-  // Signals para reatividade
+  // Signals para reatividade e estado da aplicação
   dados = signal<any[]>([]); 
   statusInfra = signal<InfraStatus | null>(null);
   chart: any;
@@ -30,15 +30,19 @@ export class App implements OnInit {
   }
 
   /**
-   * Chama a API Lambda com suporte a Filtro de Data e Time Bucket
-   * @param inicio Data inicial opcional (YYYY-MM-DD)
-   * @param fim Data final opcional (YYYY-MM-DD)
-   * @param agrupamento Tipo de bucket (minute, hour, day)
+   * Chamada principal à API Lambda
+   * Gerencia Filtro por Data, Range e Time Bucket via Query Strings
    */
   chamarApi(inicio?: string, fim?: string, agrupamento: string = 'minute') {
-    // Montagem dinâmica da URL com query strings
+    
+    // Tratamento para evitar que strings vazias de inputs de data quebrem a lógica
+    if (inicio === "") inicio = undefined;
+    if (fim === "") fim = undefined;
+
+    // URL base do seu API Gateway
     let url = `https://mympqg08a4.execute-api.us-east-1.amazonaws.com/data?bucket=${agrupamento}`;
 
+    // Adição dinâmica de parâmetros para Filtro por Range
     if (inicio) url += `&start_date=${inicio}`;
     if (fim) url += `&end_date=${fim}`;
 
@@ -54,35 +58,35 @@ export class App implements OnInit {
   }
 
   /**
-   * Renderiza ou atualiza o gráfico Chart.js
-   * @param listaDados Array de objetos vindos do RDS
-   * @param bucket Nível de agrupamento para definir a formatação do eixo X
+   * Renderiza o gráfico utilizando Chart.js
+   * Implementa a lógica visual de diferenciação entre Tempo Real e Agrupado
    */
   renderizarGrafico(listaDados: any[], bucket: string) {
     if (!listaDados || listaDados.length === 0 || !this.elementoGrafico) return;
 
-    // Invertemos o array para a ordem cronológica correta no gráfico
+    // Invertemos o array pois o RDS retorna DESC (mais novo primeiro)
+    // Para o gráfico de linha, precisamos do cronológico (esquerda -> direita)
     const dadosInvertidos = [...listaDados].reverse();
     
-    // LÓGICA DE PESQUISA: Formatação dinâmica de datas (Eixo X)
+    // Configuração do Eixo X baseada no conceito selecionado
     const labels = dadosInvertidos.map(d => {
       const data = new Date(d.data_envio);
       if (bucket === 'day') {
-        // Se visualizando meses, mostra "DD/MM"
+        // Visão Geral / Range Mensal: Mostra "dia/mês"
         return data.toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit' });
       }
-      // Se visualizando tempo real ou horas, mostra "HH:MM"
+      // Tempo Real / Média por Hora: Mostra "hora:minuto"
       return data.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
     });
 
     const valores = dadosInvertidos.map(d => d.valor);
 
-    // Destruir instância anterior para evitar bugs de hover e renderização
+    // Destruir instância anterior para liberar memória e evitar sobreposição visual
     if (this.chart) {
       this.chart.destroy();
     }
 
-    // Configurações visuais dinâmicas baseadas no modo selecionado
+    // Identidade Visual Dinâmica (Diferencia visualmente o tipo de dado)
     const corPrincipal = bucket === 'day' ? '#28a745' : (bucket === 'hour' ? '#6f42c1' : '#007bff');
 
     this.chart = new Chart(this.elementoGrafico.nativeElement, {
@@ -90,14 +94,14 @@ export class App implements OnInit {
       data: {
         labels: labels,
         datasets: [{
-          label: bucket === 'day' ? 'Média Diária' : 'Valor da Telemetria',
+          label: bucket === 'day' ? 'Média Diária (Bucket)' : 'Valor Telemetria',
           data: valores,
           borderColor: corPrincipal,
-          backgroundColor: `${corPrincipal}1A`, // Cor com 10% de opacidade para o preenchimento
+          backgroundColor: `${corPrincipal}1A`, // 10% de opacidade
           borderWidth: 3,
           fill: true,
           tension: 0.3, 
-          pointRadius: bucket === 'day' ? 5 : 3,
+          pointRadius: bucket === 'day' ? 5 : 2,
           pointBackgroundColor: corPrincipal
         }]
       },
@@ -105,17 +109,24 @@ export class App implements OnInit {
         responsive: true,
         maintainAspectRatio: false,
         plugins: {
-          legend: { display: false } 
+          legend: { display: false },
+          tooltip: {
+            mode: 'index',
+            intersect: false,
+          }
         },
         scales: {
           y: { 
             beginAtZero: false, 
-            grid: { color: '#eee' },
+            grid: { color: '#f0f0f0' },
             title: { display: true, text: 'Valor do Sensor' }
           },
           x: { 
             grid: { display: false },
-            title: { display: true, text: bucket === 'day' ? 'Período (Dias)' : 'Tempo (Horário)' }
+            title: { 
+              display: true, 
+              text: bucket === 'day' ? 'Eixo: Dias (Análise de Range)' : 'Eixo: Tempo (Agregação Bucket)' 
+            }
           }
         }
       }
@@ -123,7 +134,7 @@ export class App implements OnInit {
   }
 
   /**
-   * Monitoramento de Infraestrutura (Metadados do Banco)
+   * Monitoramento de Infraestrutura: Carrega metadados do RDS e partições
    */
   carregarInfra() {
     const url = 'https://mympqg08a4.execute-api.us-east-1.amazonaws.com/infra/status';
